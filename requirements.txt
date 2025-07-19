@@ -1,5 +1,6 @@
 Flask[async]
 requests
+gunicorn==21.2.0
 aiohttp
 googleapis-common-protos
 pycryptodome
