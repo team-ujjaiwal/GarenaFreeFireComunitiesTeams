@@ -208,7 +208,7 @@ def handle_requests():
     try:
         def process_request():
             # Fetch tokens synchronously for initial info
-            tokens_data = requests.get("https://free-fire-india-six.vercel.app/token").json()
+            tokens_data = requests.get("https://free-fire-india-five.vercel.app/token").json()
             tokens_list = tokens_data.get("tokens")
             if not tokens_list:
                 raise Exception("No tokens received from JWT API.")
