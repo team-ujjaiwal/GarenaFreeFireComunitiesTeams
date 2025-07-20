@@ -202,13 +202,13 @@ def handle_requests():
     if not uid or not server_name or not key:
         return jsonify({"error": "UID, region, and key are required"}), 400
 
-    if key != "1yearskeysforujjaiwal":
+    if key != "1yearkeysforujjaiwal":
         return jsonify({"error": "Invalid API key"}), 403
 
     try:
         def process_request():
             # Fetch tokens synchronously for initial info
-            tokens_data = requests.get("https://free-fire-india-five.vercel.app/token").json()
+            tokens_data = requests.get("https://free-fire-india-six.vercel.app/token").json()
             tokens_list = tokens_data.get("tokens")
             if not tokens_list:
                 raise Exception("No tokens received from JWT API.")
