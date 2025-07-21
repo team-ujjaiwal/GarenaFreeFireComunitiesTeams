@@ -13,23 +13,49 @@ import uid_generator_pb2
 from google.protobuf.message import DecodeError
 from datetime import datetime, timedelta
 import time
+import threading
 
 app = Flask(__name__)
 
 # Constants
 API_KEY = "1yearkeysforujjaiwal"
 API_KEY_EXPIRY_DAYS = 366
-MAX_REQUESTS = 9999
+DAILY_REQUESTS = 9999
 TOKENS_PER_API = 20
 TOTAL_APIS = 5
 MAX_LIKES = TOKENS_PER_API * TOTAL_APIS  # 100 likes
 
 # Track API usage
 api_usage = {
-    "remaining_requests": MAX_REQUESTS,
+    "remaining_requests": DAILY_REQUESTS,
     "expiry_date": datetime.now() + timedelta(days=API_KEY_EXPIRY_DAYS),
-    "created_at": datetime.now()
+    "created_at": datetime.now(),
+    "last_reset_date": datetime.now().date()
 }
+
+# Lock for thread-safe operations
+api_lock = threading.Lock()
+
+# Function to reset daily requests
+def reset_daily_requests():
+    with api_lock:
+        now = datetime.now()
+        if now.date() != api_usage["last_reset_date"]:
+            api_usage["remaining_requests"] = DAILY_REQUESTS
+            api_usage["last_reset_date"] = now.date()
+            app.logger.info("Daily requests reset to 9999")
+
+# Start background thread to check for daily reset
+def start_reset_thread():
+    def run():
+        while True:
+            reset_daily_requests()
+            time.sleep(3600)  # Check every hour
+    thread = threading.Thread(target=run)
+    thread.daemon = True
+    thread.start()
+
+start_reset_thread()
 
 # Helper function to format timedelta
 def format_timedelta(td):
@@ -231,6 +257,9 @@ def make_request(encrypt, server_name, token):
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
+    # Check for daily reset
+    reset_daily_requests()
+    
     # Check API key validity
     global api_usage
     
@@ -244,16 +273,18 @@ def handle_requests():
     if key != API_KEY:
         return jsonify({"error": "Invalid API key"}), 403
         
+    # Check if API key expired
+    if datetime.now() > api_usage["expiry_date"]:
+        return jsonify({"error": "API Key Expired Please Wait For a New Key"}), 403
+        
     # Check remaining requests
     if api_usage["remaining_requests"] <= 0:
-        return jsonify({"error": "API request limit reached"}), 429
-        
-    if datetime.now() > api_usage["expiry_date"]:
-        return jsonify({"error": "API key expired"}), 403
+        return jsonify({"error": "API Key Remaining Request Over Please Wait For Cyber Reset"}), 429
 
     try:
         # Decrement remaining requests
-        api_usage["remaining_requests"] -= 1
+        with api_lock:
+            api_usage["remaining_requests"] -= 1
         
         # Calculate time remaining for API key
         time_remaining = api_usage["expiry_date"] - datetime.now()
@@ -288,8 +319,8 @@ def handle_requests():
 
         # Send all like requests and get metrics
         successful_likes, total_tokens, processing_time = asyncio.run(
-    send_multiple_requests(uid, server_name, like_url)
-)
+            send_multiple_requests(uid, server_name, like_url)
+        )
             
         if successful_likes is None:
             raise Exception("Failed to send like requests.")
@@ -313,7 +344,7 @@ def handle_requests():
         # Prepare response
         result = {
             "APIKeyExpiresAt": time_remaining_str,
-            "APIKeyRemainingRequests": f"{api_usage['remaining_requests']}/{MAX_REQUESTS}",
+            "APIKeyRemainingRequests": f"{api_usage['remaining_requests']}/{DAILY_REQUESTS}",
             "LikeSendingProcess": like_sending_process,
             "TotalTokenGenerateFromJWTAPI": f"{total_tokens}/{MAX_LIKES}",
             "TotalTimeCaptureFromAllProcess": processing_time,
