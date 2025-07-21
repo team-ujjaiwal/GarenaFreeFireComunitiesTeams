@@ -288,8 +288,8 @@ def handle_requests():
 
         # Send all like requests and get metrics
         successful_likes, total_tokens, processing_time = asyncio.run(
-            send_multiple_requests(uid, server_name, like_url)
-        )
+    send_multiple_requests(uid, server_name, like_url)
+)
             
         if successful_likes is None:
             raise Exception("Failed to send like requests.")
