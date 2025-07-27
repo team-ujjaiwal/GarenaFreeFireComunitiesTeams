@@ -11,58 +11,8 @@ import like_pb2
 import like_count_pb2
 import uid_generator_pb2
 from google.protobuf.message import DecodeError
-from datetime import datetime, timedelta
-import time
-import threading
 
 app = Flask(__name__)
-
-# Constants
-API_KEY = "1yearkeysforujjaiwal"
-API_KEY_EXPIRY_DAYS = 366
-DAILY_REQUESTS = 9999
-TOKENS_PER_API = 20
-TOTAL_APIS = 5
-MAX_LIKES = TOKENS_PER_API * TOTAL_APIS  # 100 likes
-
-# Track API usage
-api_usage = {
-    "remaining_requests": DAILY_REQUESTS,
-    "expiry_date": datetime.now() + timedelta(days=API_KEY_EXPIRY_DAYS),
-    "created_at": datetime.now(),
-    "last_reset_date": datetime.now().date()
-}
-
-# Lock for thread-safe operations
-api_lock = threading.Lock()
-
-# Function to reset daily requests
-def reset_daily_requests():
-    with api_lock:
-        now = datetime.now()
-        if now.date() != api_usage["last_reset_date"]:
-            api_usage["remaining_requests"] = DAILY_REQUESTS
-            api_usage["last_reset_date"] = now.date()
-            app.logger.info("Daily requests reset to 9999")
-
-# Start background thread to check for daily reset
-def start_reset_thread():
-    def run():
-        while True:
-            reset_daily_requests()
-            time.sleep(3600)  # Check every hour
-    thread = threading.Thread(target=run)
-    thread.daemon = True
-    thread.start()
-
-start_reset_thread()
-
-# Helper function to format timedelta
-def format_timedelta(td):
-    days = td.days
-    hours, remainder = divmod(td.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{days} day(s) {hours} hour(s) {minutes} minute(s) {seconds} second(s)"
 
 # Encrypt a protobuf message
 def encrypt_message(plaintext):
@@ -117,13 +67,10 @@ async def fetch_all_tokens():
         "https://free-fire-india-two.vercel.app/token"
     ]
     all_tokens = []
-    total_tokens_generated = 0
-    
     try:
         async with aiohttp.ClientSession() as session:
             tasks = [session.get(url) for url in urls]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
-            
             for response in responses:
                 if isinstance(response, Exception):
                     app.logger.error(f"Error fetching token: {response}")
@@ -137,17 +84,15 @@ async def fetch_all_tokens():
                     app.logger.error("No tokens in this response.")
                     continue
                 all_tokens.extend(tokens)
-                total_tokens_generated += len(tokens)
 
         if not all_tokens:
             app.logger.error("No tokens received from any API.")
-            return None, 0
-            
-        return all_tokens, total_tokens_generated
+            return None
+        return all_tokens
 
     except Exception as e:
         app.logger.error(f"Error fetching tokens: {e}")
-        return None, 0
+        return None
 
 # Send a single like request
 async def send_request(encrypted_uid, token, url):
@@ -181,35 +126,28 @@ async def send_multiple_requests(uid, server_name, url):
         protobuf_message = create_protobuf_message(uid, region)
         if protobuf_message is None:
             app.logger.error("Failed to create protobuf message.")
-            return None, 0, 0
+            return None
 
         encrypted_uid = encrypt_message(protobuf_message)
         if encrypted_uid is None:
             app.logger.error("Encryption failed.")
-            return None, 0, 0
+            return None
 
-        tokens, total_tokens = await fetch_all_tokens()
+        tokens = await fetch_all_tokens()
         if tokens is None:
             app.logger.error("Failed to load tokens from JWT APIs.")
-            return None, 0, 0
+            return None
 
-        start_time = time.time()
         tasks = []
         for token in tokens:
             tasks.append(send_request(encrypted_uid, token, url))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        end_time = time.time()
-        processing_time = str(timedelta(seconds=end_time-start_time)).split(".")[0]  # HH:MM:SS format
-        
-        # Calculate successful likes
-        successful_likes = sum(1 for result in results if result is not None and not isinstance(result, Exception))
-        
-        return successful_likes, total_tokens, processing_time
+        return results
 
     except Exception as e:
         app.logger.error(f"Exception in send_multiple_requests: {e}")
-        return None, 0, 0
+        return None
 
 # Decode protobuf data into object
 def decode_protobuf(binary):
@@ -257,12 +195,6 @@ def make_request(encrypt, server_name, token):
 
 @app.route('/like', methods=['GET'])
 def handle_requests():
-    # Check for daily reset
-    reset_daily_requests()
-    
-    # Check API key validity
-    global api_usage
-    
     uid = request.args.get("uid")
     server_name = request.args.get("region", "").upper()
     key = request.args.get("key")
@@ -270,91 +202,62 @@ def handle_requests():
     if not uid or not server_name or not key:
         return jsonify({"error": "UID, region, and key are required"}), 400
 
-    if key != API_KEY:
+    if key != "2weekskeysforujjaiwal":
         return jsonify({"error": "Invalid API key"}), 403
-        
-    # Check if API key expired
-    if datetime.now() > api_usage["expiry_date"]:
-        return jsonify({"error": "API Key Expired Please Wait For a New Key"}), 403
-        
-    # Check remaining requests
-    if api_usage["remaining_requests"] <= 0:
-        return jsonify({"error": "API Key Remaining Request Over Please Wait For Cyber Reset"}), 429
 
     try:
-        # Decrement remaining requests
-        with api_lock:
-            api_usage["remaining_requests"] -= 1
-        
-        # Calculate time remaining for API key
-        time_remaining = api_usage["expiry_date"] - datetime.now()
-        time_remaining_str = format_timedelta(time_remaining)
-        
-        # Fetch tokens synchronously for initial info
-        tokens_data = requests.get("https://free-fire-india-six.vercel.app/token").json()
-        tokens_list = tokens_data.get("tokens")
-        if not tokens_list:
-            raise Exception("No tokens received from JWT API.")
-        token = tokens_list[0]
+        def process_request():
+            # Fetch tokens synchronously for initial info
+            tokens_data = requests.get("https://free-fire-india-six.vercel.app/token").json()
+            tokens_list = tokens_data.get("tokens")
+            if not tokens_list:
+                raise Exception("No tokens received from JWT API.")
+            token = tokens_list[0]
 
-        encrypted_uid = enc(uid)
-        if encrypted_uid is None:
-            raise Exception("Encryption of UID failed.")
+            encrypted_uid = enc(uid)
+            if encrypted_uid is None:
+                raise Exception("Encryption of UID failed.")
 
-        before = make_request(encrypted_uid, server_name, token)
-        if before is None:
-            raise Exception("Failed to retrieve initial player info.")
-        jsone = MessageToJson(before)
-        data_before = json.loads(jsone)
-        before_like = int(data_before.get('AccountInfo', {}).get('Likes', 0))
-        app.logger.info(f"Likes before command: {before_like}")
+            before = make_request(encrypted_uid, server_name, token)
+            if before is None:
+                raise Exception("Failed to retrieve initial player info.")
+            jsone = MessageToJson(before)
+            data_before = json.loads(jsone)
+            before_like = int(data_before.get('AccountInfo', {}).get('Likes', 0))
+            app.logger.info(f"Likes before command: {before_like}")
 
-        # Select the like endpoint
-        if server_name == "IND":
-            like_url = "https://client.ind.freefiremobile.com/LikeProfile"
-        elif server_name in {"BR", "US", "SAC", "NA"}:
-            like_url = "https://client.us.freefiremobile.com/LikeProfile"
-        else:
-            like_url = "https://clientbp.ggblueshark.com/LikeProfile"
+            # Select the like endpoint
+            if server_name == "IND":
+                like_url = "https://client.ind.freefiremobile.com/LikeProfile"
+            elif server_name in {"BR", "US", "SAC", "NA"}:
+                like_url = "https://client.us.freefiremobile.com/LikeProfile"
+            else:
+                like_url = "https://clientbp.ggblueshark.com/LikeProfile"
 
-        # Send all like requests and get metrics
-        successful_likes, total_tokens, processing_time = asyncio.run(
-            send_multiple_requests(uid, server_name, like_url)
-        )
-            
-        if successful_likes is None:
-            raise Exception("Failed to send like requests.")
+            # Send all like requests
+            asyncio.run(send_multiple_requests(uid, server_name, like_url))
 
-        after = make_request(encrypted_uid, server_name, token)
-        if after is None:
-            raise Exception("Failed to retrieve player info after like requests.")
-        jsone_after = MessageToJson(after)
-        data_after = json.loads(jsone_after)
-        after_like = int(data_after.get('AccountInfo', {}).get('Likes', 0))
-        player_uid = int(data_after.get('AccountInfo', {}).get('UID', 0))
-        player_name = str(data_after.get('AccountInfo', {}).get('PlayerNickname', ''))
-        like_given = after_like - before_like
-        
-        # Calculate like sending process string (20+20+20+20+20 format)
-        likes_per_api = [str(TOKENS_PER_API) for _ in range(TOTAL_APIS)]
-        like_sending_process = "+".join(likes_per_api) + f"/{MAX_LIKES}"
-        
-        status = 1 if like_given != 0 else 2
-        
-        # Prepare response
-        result = {
-            "APIKeyExpiresAt": time_remaining_str,
-            "APIKeyRemainingRequests": f"{api_usage['remaining_requests']}/{DAILY_REQUESTS}",
-            "LikeSendingProcess": like_sending_process,
-            "TotalTokenGenerateFromJWTAPI": f"{total_tokens}/{MAX_LIKES}",
-            "TotalTimeCaptureFromAllProcess": processing_time,
-            "LikesGivenByAPI": like_given,
-            "LikesafterCommand": after_like,
-            "LikesbeforeCommand": before_like,
-            "PlayerNickname": player_name,
-            "UID": player_uid,
-            "status": status
-        }
+            after = make_request(encrypted_uid, server_name, token)
+            if after is None:
+                raise Exception("Failed to retrieve player info after like requests.")
+            jsone_after = MessageToJson(after)
+            data_after = json.loads(jsone_after)
+            after_like = int(data_after.get('AccountInfo', {}).get('Likes', 0))
+            player_uid = int(data_after.get('AccountInfo', {}).get('UID', 0))
+            player_name = str(data_after.get('AccountInfo', {}).get('PlayerNickname', ''))
+            like_given = after_like - before_like
+            status = 1 if like_given != 0 else 2
+            result = {
+                "LikesGivenByAPI": like_given,
+                "LikesbeforeCommand": before_like,
+                "LikesafterCommand": after_like,
+                "PlayerNickname": player_name,
+                "UID": player_uid,
+                "status": status
+            }
+            return result
+
+        result = process_request()
         return jsonify(result)
     except Exception as e:
         app.logger.error(f"Error processing request: {e}")
